@@ -32,18 +32,25 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Protect student dashboard
+  // Protect student dashboard — redirect to unified login at /
   if (pathname.startsWith("/dashboard") && !user) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = "/";
     return NextResponse.redirect(url);
   }
 
-  // Protect admin routes (except /admin/login)
-  if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
+  // Protect admin routes
+  // Redirect old /admin/login to unified login
+  if (pathname === "/admin/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    return NextResponse.redirect(url);
+  }
+
+  if (pathname.startsWith("/admin")) {
     if (!user) {
       const url = request.nextUrl.clone();
-      url.pathname = "/admin/login";
+      url.pathname = "/";
       return NextResponse.redirect(url);
     }
 
@@ -51,9 +58,27 @@ export async function updateSession(request: NextRequest) {
     const adminEmail = process.env.ADMIN_EMAIL;
     if (adminEmail && user.email !== adminEmail) {
       const url = request.nextUrl.clone();
-      url.pathname = "/admin/login";
+      url.pathname = "/";
       return NextResponse.redirect(url);
     }
+  }
+
+  // Redirect old /login route to unified login
+  if (pathname === "/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    return NextResponse.redirect(url);
+  }
+
+  // Prevent back-button exposure of protected pages after logout
+  // Set no-store on protected routes so the browser doesn't cache them
+  if (pathname.startsWith("/dashboard") || pathname.startsWith("/admin")) {
+    supabaseResponse.headers.set(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, proxy-revalidate"
+    );
+    supabaseResponse.headers.set("Pragma", "no-cache");
+    supabaseResponse.headers.set("Expires", "0");
   }
 
   return supabaseResponse;

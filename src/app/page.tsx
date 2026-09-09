@@ -1,35 +1,190 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { PageSpinner } from "@/components/ui/spinner";
-import type { EventRow } from "@/lib/types";
-import { formatDate, formatTime } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Alert } from "@/components/ui/alert";
 
-export default function LandingPage() {
-  const [event, setEvent] = useState<EventRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [ticketAvailable, setTicketAvailable] = useState(false);
+type LoginTab = "student" | "admin";
+type StudentStep = "email" | "otp";
 
+// Simple email regex for client-side validation
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const RESEND_COOLDOWN_SECONDS = 60;
+
+export default function UnifiedLoginPage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<LoginTab>("student");
+
+  // ── Student state ──────────────────────────────────────────────
+  const [studentStep, setStudentStep] = useState<StudentStep>("email");
+  const [studentEmail, setStudentEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [studentLoading, setStudentLoading] = useState(false);
+  const [studentError, setStudentError] = useState("");
+  const [studentSuccess, setStudentSuccess] = useState("");
+
+  // ── Resend cooldown ────────────────────────────────────────────
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Prevent double-submit ──────────────────────────────────────
+  const otpRequestInFlight = useRef(false);
+
+  // ── Admin state ────────────────────────────────────────────────
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState("");
+
+  // Cleanup cooldown timer on unmount
   useEffect(() => {
-    fetch("/api/admin/event")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.event) {
-          setEvent(data.event);
-          setTicketAvailable(data.ticketAvailable ?? false);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    return () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
   }, []);
 
-  if (loading) return <PageSpinner />;
+  // Start cooldown countdown
+  const startCooldown = useCallback(() => {
+    setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  // ================================================================
+  // Student handlers
+  // ================================================================
+
+  async function handleSendOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setStudentError("");
+    setStudentSuccess("");
+
+    // Prevent concurrent requests
+    if (otpRequestInFlight.current || studentLoading) return;
+
+    const trimmedEmail = studentEmail.trim().toLowerCase();
+    if (!trimmedEmail || !EMAIL_REGEX.test(trimmedEmail)) {
+      setStudentError("Please enter a valid email address.");
+      return;
+    }
+
+    // Check cooldown
+    if (resendCooldown > 0) {
+      setStudentError(
+        `Please wait ${resendCooldown} seconds before requesting another code.`
+      );
+      return;
+    }
+
+    otpRequestInFlight.current = true;
+    setStudentLoading(true);
+    try {
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setStudentError(data.error || "Something went wrong. Please try again.");
+        return;
+      }
+
+      setStudentSuccess("OTP sent! Check your email inbox (and spam folder).");
+      setStudentStep("otp");
+      startCooldown();
+    } catch {
+      setStudentError("Network error. Please check your connection and try again.");
+    } finally {
+      setStudentLoading(false);
+      otpRequestInFlight.current = false;
+    }
+  }
+
+  async function handleVerifyOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setStudentError("");
+    setStudentSuccess("");
+
+    if (studentLoading) return;
+
+    if (!otp.trim() || otp.trim().length < 6) {
+      setStudentError("Please enter the 6-digit OTP.");
+      return;
+    }
+
+    setStudentLoading(true);
+    try {
+      const res = await fetch("/api/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: studentEmail.trim().toLowerCase(), token: otp.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setStudentError(data.error || "Invalid OTP. Please try again.");
+        return;
+      }
+
+      router.push("/dashboard");
+    } catch {
+      setStudentError("Network error. Please check your connection and try again.");
+    } finally {
+      setStudentLoading(false);
+    }
+  }
+
+  // ================================================================
+  // Admin handler
+  // ================================================================
+
+  async function handleAdminLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setAdminError("");
+    setAdminLoading(true);
+
+    try {
+      const supabase = createClient();
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: adminEmail.trim(),
+        password: adminPassword,
+      });
+
+      if (authError) {
+        setAdminError("Invalid credentials. Please try again.");
+        return;
+      }
+
+      router.push("/admin");
+      router.refresh();
+    } catch {
+      setAdminError("Something went wrong. Please try again.");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  // ================================================================
+  // Render
+  // ================================================================
 
   return (
-    <div className="min-h-screen">
-      {/* Hero Section */}
+    <div className="min-h-screen flex flex-col">
+      {/* Gradient Header */}
       <div className="gradient-hero relative overflow-hidden">
         {/* Decorative elements */}
         <div className="absolute inset-0 overflow-hidden">
@@ -38,136 +193,229 @@ export default function LandingPage() {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white/[0.02] rounded-full" />
         </div>
 
-        <div className="relative max-w-lg mx-auto px-6 pt-12 pb-16 text-center">
-          {/* Event Logo/Badge */}
-          <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2 mb-6">
+        <div className="relative max-w-lg mx-auto px-6 pt-10 pb-14 text-center">
+          {/* Logo/Badge */}
+          <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2 mb-5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-white/90 text-sm font-medium">
-              College Induction 2026
+              E-Ticket System
             </span>
           </div>
 
-          {/* Event Name */}
-          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-4 leading-tight">
-            {event?.name || "College Induction Ceremony"}
+          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2 leading-tight">
+            College Induction
           </h1>
-
-          {/* Event Description */}
-          {event?.description && (
-            <p className="text-white/80 text-base mb-8 max-w-md mx-auto leading-relaxed">
-              {event.description}
-            </p>
-          )}
-
-          {/* Event Quick Info */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-8">
-            {event?.date && (
-              <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-2">
-                <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                <span className="text-white/90 text-sm font-medium">
-                  {formatDate(event.date)}
-                </span>
-              </div>
-            )}
-            {event?.venue && (
-              <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-2">
-                <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                <span className="text-white/90 text-sm font-medium">
-                  {event.venue}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Time */}
-          {(event?.start_time || event?.end_time) && (
-            <p className="text-white/70 text-sm mb-8">
-              🕐 {formatTime(event?.start_time ?? null)}
-              {event?.end_time && ` — ${formatTime(event.end_time)}`}
-            </p>
-          )}
+          <p className="text-white/70 text-sm">
+            Sign in to access your e-ticket or manage the event
+          </p>
         </div>
       </div>
 
-      {/* CTA Section */}
-      <div className="max-w-lg mx-auto px-6 -mt-6">
-        <div className="glass-card rounded-2xl p-6 text-center animate-fadeInUp">
-          {ticketAvailable ? (
-            <>
-              <div className="w-14 h-14 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-7 h-7 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+      {/* Login Card */}
+      <div className="flex-1 max-w-lg mx-auto w-full px-6 -mt-6">
+        <div className="glass-card rounded-2xl overflow-hidden animate-fadeInUp">
+          {/* Tab Switcher */}
+          <div className="flex border-b border-slate-100">
+            <button
+              onClick={() => {
+                setActiveTab("student");
+                setAdminError("");
+              }}
+              className={`flex-1 py-4 text-sm font-semibold transition-all duration-300 relative ${
+                activeTab === "student"
+                  ? "text-primary-600"
+                  : "text-slate-400 hover:text-slate-600"
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
+                Student Login
               </div>
-              <h2 className="text-xl font-bold text-slate-900 mb-2">
-                E-Tickets are Live!
-              </h2>
-              <p className="text-slate-500 text-sm mb-6">
-                Get your digital entry pass now. Quick, secure, and paperless.
-              </p>
-              <Link href="/login">
-                <Button size="lg" className="w-full">
-                  Get My Ticket →
-                </Button>
-              </Link>
-            </>
-          ) : (
-            <>
-              <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              {activeTab === "student" && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600 rounded-full" />
+              )}
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("admin");
+                setStudentError("");
+                setStudentSuccess("");
+              }}
+              className={`flex-1 py-4 text-sm font-semibold transition-all duration-300 relative ${
+                activeTab === "admin"
+                  ? "text-primary-600"
+                  : "text-slate-400 hover:text-slate-600"
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
+                Admin Login
               </div>
-              <h2 className="text-xl font-bold text-slate-900 mb-2">
-                Tickets Not Available Yet
-              </h2>
-              <p className="text-slate-500 text-sm">
-                The e-ticket system is currently closed. Please check back later
-                or contact your college administration.
-              </p>
-            </>
-          )}
-        </div>
+              {activeTab === "admin" && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600 rounded-full" />
+              )}
+            </button>
+          </div>
 
-        {/* Event Details Cards */}
-        {event && (
-          <div className="mt-6 space-y-4 animate-fadeInUp-delay pb-12">
-            {event.attire && (
-              <div className="glass-card rounded-xl p-4 flex items-start gap-3">
-                <div className="w-9 h-9 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
-                  <span className="text-lg">👔</span>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                    Dress Code
-                  </p>
-                  <p className="text-sm text-slate-700">{event.attire}</p>
-                </div>
+          {/* Tab Content */}
+          <div className="p-6">
+            {/* ─── Student Tab ─────────────────────────────────── */}
+            {activeTab === "student" && (
+              <div className="animate-fadeInUp">
+                {studentError && (
+                  <Alert variant="error" className="mb-4" onDismiss={() => setStudentError("")}>
+                    {studentError}
+                  </Alert>
+                )}
+                {studentSuccess && (
+                  <Alert variant="success" className="mb-4">
+                    {studentSuccess}
+                  </Alert>
+                )}
+
+                {studentStep === "email" ? (
+                  <form onSubmit={handleSendOtp} className="space-y-5">
+                    <div className="text-center mb-2">
+                      <div className="w-12 h-12 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-3">
+                        <svg className="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                        </svg>
+                      </div>
+                      <h2 className="text-lg font-bold text-slate-900">Get Your E-Ticket</h2>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Enter your registered email to receive a verification code
+                      </p>
+                    </div>
+                    <Input
+                      label="Email Address"
+                      type="email"
+                      placeholder="your.email@college.edu"
+                      value={studentEmail}
+                      onChange={(e) => setStudentEmail(e.target.value)}
+                      required
+                      autoFocus
+                      autoComplete="email"
+                    />
+                    <Button type="submit" size="lg" className="w-full" loading={studentLoading}>
+                      Send Verification Code
+                    </Button>
+                    <p className="text-xs text-slate-400 text-center">
+                      Only emails registered in the eligible student list can proceed.
+                    </p>
+                  </form>
+                ) : (
+                  <form onSubmit={handleVerifyOtp} className="space-y-5">
+                    <div className="text-center mb-2">
+                      <h2 className="text-lg font-bold text-slate-900">Enter OTP</h2>
+                      <p className="text-xs text-slate-500 mt-1">
+                        We sent a code to {studentEmail}
+                      </p>
+                    </div>
+                    <Input
+                      label="Verification Code"
+                      type="text"
+                      placeholder="Enter 6-digit OTP"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      maxLength={6}
+                      required
+                      autoFocus
+                      autoComplete="one-time-code"
+                      inputMode="numeric"
+                      className="text-center text-2xl tracking-[0.5em] font-mono"
+                    />
+                    <Button type="submit" size="lg" className="w-full" loading={studentLoading}>
+                      Verify &amp; Login
+                    </Button>
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStudentStep("email");
+                          setOtp("");
+                          setStudentError("");
+                          setStudentSuccess("");
+                        }}
+                        className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                      >
+                        Change Email
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendOtp({ preventDefault: () => {} } as React.FormEvent)}
+                        className={`text-sm font-medium transition-colors ${
+                          resendCooldown > 0 || studentLoading
+                            ? "text-slate-400 cursor-not-allowed"
+                            : "text-primary-600 hover:text-primary-700"
+                        }`}
+                        disabled={resendCooldown > 0 || studentLoading}
+                      >
+                        {resendCooldown > 0
+                          ? `Resend OTP (${resendCooldown}s)`
+                          : "Resend OTP"}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             )}
 
-            {event.instructions && (
-              <div className="glass-card rounded-xl p-4 flex items-start gap-3">
-                <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
-                  <span className="text-lg">📋</span>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                    Important Instructions
-                  </p>
-                  <p className="text-sm text-slate-700 whitespace-pre-line">
-                    {event.instructions}
-                  </p>
-                </div>
+            {/* ─── Admin Tab ──────────────────────────────────── */}
+            {activeTab === "admin" && (
+              <div className="animate-fadeInUp">
+                {adminError && (
+                  <Alert variant="error" className="mb-4" onDismiss={() => setAdminError("")}>
+                    {adminError}
+                  </Alert>
+                )}
+
+                <form onSubmit={handleAdminLogin} className="space-y-5">
+                  <div className="text-center mb-2">
+                    <div className="w-12 h-12 rounded-2xl bg-primary-600 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-primary-500/30">
+                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                    </div>
+                    <h2 className="text-lg font-bold text-slate-900">Admin Dashboard</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      E-Ticket Management Console
+                    </p>
+                  </div>
+                  <Input
+                    label="Email"
+                    type="email"
+                    placeholder="admin@college.edu"
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                  />
+                  <Input
+                    label="Password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                  />
+                  <Button type="submit" size="lg" className="w-full" loading={adminLoading}>
+                    Sign In
+                  </Button>
+                </form>
               </div>
             )}
           </div>
-        )}
+        </div>
+
+        {/* Footer */}
+        <p className="text-center text-xs text-slate-400 mt-6 pb-8">
+          Secure, fast, and paperless entry management
+        </p>
       </div>
     </div>
   );

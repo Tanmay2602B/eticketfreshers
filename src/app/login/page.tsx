@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,10 @@ import { Alert } from "@/components/ui/alert";
 import Link from "next/link";
 
 type Step = "email" | "otp";
+
+// Simple email regex for client-side validation
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const RESEND_COOLDOWN_SECONDS = 60;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,17 +22,54 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  // ── Resend cooldown ────────────────────────────────────────────
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const otpRequestInFlight = useRef(false);
+
+  // Cleanup cooldown timer on unmount
+  useEffect(() => {
+    return () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
+  }, []);
+
+  const startCooldown = useCallback(() => {
+    setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setSuccess("");
 
+    if (otpRequestInFlight.current || loading) return;
+
     const trimmedEmail = email.trim().toLowerCase();
-    if (!trimmedEmail || !trimmedEmail.includes("@")) {
+    if (!trimmedEmail || !EMAIL_REGEX.test(trimmedEmail)) {
       setError("Please enter a valid email address.");
       return;
     }
 
+    if (resendCooldown > 0) {
+      setError(
+        `Please wait ${resendCooldown} seconds before requesting another code.`
+      );
+      return;
+    }
+
+    otpRequestInFlight.current = true;
     setLoading(true);
     try {
       const res = await fetch("/api/auth/send-otp", {
@@ -45,10 +86,12 @@ export default function LoginPage() {
 
       setSuccess("OTP sent! Check your email inbox (and spam folder).");
       setStep("otp");
+      startCooldown();
     } catch {
       setError("Network error. Please check your connection and try again.");
     } finally {
       setLoading(false);
+      otpRequestInFlight.current = false;
     }
   }
 
@@ -56,6 +99,8 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setSuccess("");
+
+    if (loading) return;
 
     if (!otp.trim() || otp.trim().length < 6) {
       setError("Please enter the 6-digit OTP.");
@@ -155,7 +200,7 @@ export default function LoginPage() {
                 className="text-center text-2xl tracking-[0.5em] font-mono"
               />
               <Button type="submit" size="lg" className="w-full" loading={loading}>
-                Verify & Login
+                Verify &amp; Login
               </Button>
               <div className="flex items-center justify-between">
                 <button
@@ -173,10 +218,16 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => handleSendOtp({ preventDefault: () => {} } as React.FormEvent)}
-                  className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-                  disabled={loading}
+                  className={`text-sm font-medium transition-colors ${
+                    resendCooldown > 0 || loading
+                      ? "text-slate-400 cursor-not-allowed"
+                      : "text-primary-600 hover:text-primary-700"
+                  }`}
+                  disabled={resendCooldown > 0 || loading}
                 >
-                  Resend OTP
+                  {resendCooldown > 0
+                    ? `Resend OTP (${resendCooldown}s)`
+                    : "Resend OTP"}
                 </button>
               </div>
             </form>

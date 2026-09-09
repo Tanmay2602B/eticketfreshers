@@ -22,7 +22,7 @@ export default function StudentDashboard() {
     fetch("/api/student/dashboard")
       .then((r) => {
         if (r.status === 401) {
-          router.push("/login");
+          router.push("/");
           return null;
         }
         return r.json();
@@ -104,7 +104,7 @@ export default function StudentDashboard() {
       <div className="min-h-screen flex items-center justify-center p-6">
         <Card className="text-center max-w-sm w-full">
           <p className="text-slate-500 mb-4">Unable to load your information.</p>
-          <Button onClick={() => router.push("/login")} variant="secondary">
+          <Button onClick={() => router.push("/")} variant="secondary">
             Go to Login
           </Button>
         </Card>

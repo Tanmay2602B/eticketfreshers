@@ -14,7 +14,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (token.length < 6) {
+    // OTP must be exactly 6 digits
+    if (!/^\d{6}$/.test(token)) {
       return NextResponse.json(
         { error: "Please enter a valid 6-digit code." },
         { status: 400 }
@@ -32,15 +33,29 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("OTP verification error:", error);
 
-      if (error.message?.includes("expired")) {
+      // Handle specific error cases with user-friendly messages
+      if (
+        error.message?.toLowerCase().includes("expired") ||
+        error.message?.toLowerCase().includes("otp_expired")
+      ) {
         return NextResponse.json(
           { error: "Verification code has expired. Please request a new one." },
           { status: 400 }
         );
       }
 
+      if (
+        error.message?.toLowerCase().includes("rate") ||
+        error.status === 429
+      ) {
+        return NextResponse.json(
+          { error: "Too many attempts. Please wait before trying again." },
+          { status: 429 }
+        );
+      }
+
       return NextResponse.json(
-        { error: "Invalid verification code. Please try again." },
+        { error: "Invalid or expired verification code. Please try again." },
         { status: 400 }
       );
     }
