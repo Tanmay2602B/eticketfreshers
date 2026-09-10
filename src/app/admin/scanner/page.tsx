@@ -5,6 +5,43 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { ScanResponse } from "@/lib/types";
 
+// ── Sound engine using Web Audio API (no external deps) ──────────────────────
+function playSound(type: "success" | "denied" | "warning") {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+
+    const beep = (freq: number, start: number, duration: number, vol = 0.5) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+      gain.gain.setValueAtTime(vol, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration + 0.05);
+    };
+
+    if (type === "success") {
+      // Two rising beeps — classic success
+      beep(880, 0, 0.12, 0.4);
+      beep(1320, 0.15, 0.18, 0.5);
+    } else if (type === "warning") {
+      // Three quick warning beeps
+      beep(600, 0, 0.1, 0.4);
+      beep(600, 0.15, 0.1, 0.4);
+      beep(600, 0.30, 0.1, 0.4);
+    } else {
+      // Low buzz — denied
+      beep(220, 0, 0.3, 0.6);
+      beep(180, 0.25, 0.4, 0.5);
+    }
+  } catch {
+    // AudioContext not supported — silently skip
+  }
+}
+
 export default function ScannerPage() {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
@@ -29,6 +66,10 @@ export default function ScannerPage() {
 
         const data: ScanResponse = await res.json();
         setScanResult(data);
+        // Play sound based on result
+        if (data.result === "VALID") playSound("success");
+        else if (data.result === "ALREADY_USED") playSound("warning");
+        else playSound("denied");
       } catch {
         setError("Network error. Please try again.");
       } finally {
