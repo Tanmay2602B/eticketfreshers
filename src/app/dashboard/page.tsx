@@ -134,20 +134,23 @@ export default function StudentDashboard() {
           <Alert variant="error" onDismiss={() => setError("")}>{error}</Alert>
         )}
 
-        {/* ── Ticket not available ── */}
-        {!ticketAvailable && !ticket && (
+        {/* ── Ticket system OFFLINE — hide everything ── */}
+        {!ticketAvailable && (
           <Card glass className="animate-fadeInUp text-center py-8">
             <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
               <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
             </div>
-            <h3 className="font-bold text-slate-900 mb-1">Ticket Window Closed</h3>
-            <p className="text-sm text-slate-500">The e-ticket system is currently closed. Please check back later.</p>
+            <h3 className="font-bold text-slate-900 mb-1">Ticket System Offline</h3>
+            <p className="text-sm text-slate-500">
+              The e-ticket system is currently closed by the administrator.<br />
+              Please check back when the event begins.
+            </p>
           </Card>
         )}
 
-        {/* ── Generate button ── */}
+        {/* ── Generate button (live + no ticket yet) ── */}
         {ticketAvailable && !ticket && (
           <Card glass className="animate-fadeInUp text-center py-6">
             <div className="w-16 h-16 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-3">
@@ -163,8 +166,9 @@ export default function StudentDashboard() {
           </Card>
         )}
 
-        {/* ── ON-SCREEN TICKET with QR code ── */}
-        {ticket && ticket.status === "ACTIVE" && (
+        {/* ── ON-SCREEN TICKET — only when system is LIVE ── */}
+        {ticketAvailable && ticket && ticket.status === "ACTIVE" && (
+
           <>
             {/* Visual Ticket Card */}
             <div className="animate-fadeInUp">
@@ -254,7 +258,7 @@ export default function StudentDashboard() {
         )}
 
         {/* ── Used ticket ── */}
-        {ticket?.status === "USED" && (
+        {ticketAvailable && ticket?.status === "USED" && (
           <Card glass className="animate-fadeInUp text-center py-6">
             <Badge variant="used" className="mb-3">TICKET USED</Badge>
             <div className="w-16 h-16 rounded-2xl bg-amber-50 flex items-center justify-center mx-auto mb-3">
@@ -271,7 +275,7 @@ export default function StudentDashboard() {
         )}
 
         {/* ── Cancelled ticket ── */}
-        {ticket?.status === "CANCELLED" && (
+        {ticketAvailable && ticket?.status === "CANCELLED" && (
           <Card glass className="animate-fadeInUp text-center py-6">
             <Badge variant="cancelled" className="mb-3">CANCELLED</Badge>
             <h3 className="font-bold text-slate-900 mb-1">Ticket Cancelled</h3>
