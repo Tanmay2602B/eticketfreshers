@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
+  let body: { email?: string; token?: string };
   try {
-    const body = await request.json();
-    const email = (body.email || "").trim().toLowerCase();
-    const token = (body.token || "").trim();
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Please enter a valid email address and verification code." },
+      { status: 400 }
+    );
+  }
 
-    if (!email || !token) {
+  try {
+    const normalizedEmail = (body?.email || "").trim().toLowerCase();
+    const token = (body?.token || "").trim();
+
+    if (!normalizedEmail || !token) {
       return NextResponse.json(
-        { error: "Email and verification code are required." },
+        { error: "Please enter a valid email address and verification code." },
         { status: 400 }
       );
     }
@@ -25,7 +34,7 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient();
 
     const { data, error } = await supabase.auth.verifyOtp({
-      email,
+      email: normalizedEmail,
       token,
       type: "email",
     });
@@ -33,37 +42,45 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("OTP verification error:", error);
 
-      // Handle specific error cases with user-friendly messages
-      if (
-        error.message?.toLowerCase().includes("expired") ||
-        error.message?.toLowerCase().includes("otp_expired")
-      ) {
-        return NextResponse.json(
-          { error: "Verification code has expired. Please request a new one." },
-          { status: 400 }
-        );
-      }
-
       if (
         error.message?.toLowerCase().includes("rate") ||
         error.status === 429
       ) {
         return NextResponse.json(
-          { error: "Too many attempts. Please wait before trying again." },
+          { error: "Too many requests. Please wait before requesting another OTP." },
           { status: 429 }
         );
       }
 
       return NextResponse.json(
-        { error: "Invalid or expired verification code. Please try again." },
+        { error: "Invalid or expired OTP." },
         { status: 400 }
       );
     }
 
-    if (!data.session) {
+    if (!data.session || !data.user) {
       return NextResponse.json(
-        { error: "Verification failed. Please try again." },
+        { error: "Invalid or expired OTP." },
         { status: 400 }
+      );
+    }
+
+    // Student Authorization: Verify the authenticated email is in eligible_students
+    const verifiedEmail = (data.user.email || "").toLowerCase();
+    const serviceClient = await createServiceClient();
+
+    const { data: student, error: studentError } = await serviceClient
+      .from("eligible_students")
+      .select("id")
+      .eq("email", verifiedEmail)
+      .maybeSingle();
+
+    if (studentError || !student) {
+      // Invalidate session if not authorized
+      await supabase.auth.signOut();
+      return NextResponse.json(
+        { error: "This email is not registered for Freshers 2026." },
+        { status: 403 }
       );
     }
 

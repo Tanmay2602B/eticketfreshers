@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 
-// Simple email regex — catches most invalid inputs without being overly strict
+// Simple email regex — validates proper standard email format
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: NextRequest) {
+  let body: { email?: string };
   try {
-    const body = await request.json();
-    const email = (body.email || "").trim().toLowerCase();
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Please enter a valid email address." },
+      { status: 400 }
+    );
+  }
 
-    if (!email || !EMAIL_REGEX.test(email)) {
+  try {
+    const normalizedEmail = (body?.email || "").trim().toLowerCase();
+
+    if (!normalizedEmail || !EMAIL_REGEX.test(normalizedEmail)) {
       return NextResponse.json(
         { error: "Please enter a valid email address." },
         { status: 400 }
@@ -22,44 +31,43 @@ export async function POST(request: NextRequest) {
     const { data: student, error: lookupError } = await supabase
       .from("eligible_students")
       .select("id")
-      .eq("email", email)
+      .eq("email", normalizedEmail)
       .maybeSingle();
 
     if (lookupError) {
       console.error("Eligible student lookup error:", lookupError);
       return NextResponse.json(
-        { error: "Something went wrong. Please try again." },
+        { error: "Unable to send OTP. Please try again." },
         { status: 500 }
       );
     }
 
     if (!student) {
-      // Do not reveal whether the email exists in our system at all.
-      // Use a generic message to prevent user enumeration.
       return NextResponse.json(
-        {
-          error:
-            "This email is not registered for Freshers 2026. Please contact your college administration if you believe this is an error.",
-        },
+        { error: "This email is not registered for Freshers 2026." },
         { status: 403 }
       );
     }
 
-    // Send OTP via Supabase Auth
-    // shouldCreateUser: true is intentional here — eligible students are verified
-    // above, and Supabase Auth needs a user record to send OTP to. The server-side
-    // eligibility check gates who can reach this point.
+    // Ensure user exists in Supabase Auth so shouldCreateUser: false succeeds
+    // If the user already exists in auth.users, createUser safely returns an error which is ignored.
+    await supabase.auth.admin.createUser({
+      email: normalizedEmail,
+      email_confirm: true,
+    });
+
+    // Send OTP via Supabase Auth Email OTP
     const { error: otpError } = await supabase.auth.signInWithOtp({
-      email,
+      email: normalizedEmail,
       options: {
-        shouldCreateUser: true,
+        shouldCreateUser: false,
       },
     });
 
     if (otpError) {
       console.error("OTP send error:", otpError);
 
-      // Handle rate limiting from Supabase
+      // Handle rate limiting from Supabase Auth
       if (
         otpError.message?.toLowerCase().includes("rate") ||
         otpError.message?.toLowerCase().includes("limit") ||
@@ -68,25 +76,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error:
-              "Too many requests. Please wait a few minutes before trying again.",
+              "Too many requests. Please wait before requesting another OTP.",
           },
           { status: 429 }
         );
       }
 
-      // Handle email sending failures (SMTP misconfiguration, etc.)
-      if (otpError.message?.toLowerCase().includes("email")) {
-        return NextResponse.json(
-          {
-            error:
-              "Unable to send verification code. Please try again later.",
-          },
-          { status: 500 }
-        );
-      }
-
       return NextResponse.json(
-        { error: "Failed to send verification code. Please try again." },
+        { error: "Unable to send OTP. Please try again." },
         { status: 500 }
       );
     }
@@ -95,7 +92,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Send OTP error:", error);
     return NextResponse.json(
-      { error: "Something went wrong. Please try again." },
+      { error: "Unable to send OTP. Please try again." },
       { status: 500 }
     );
   }

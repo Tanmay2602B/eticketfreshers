@@ -2,6 +2,68 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { generateTicketId, generateSecureToken, isTicketWindowOpen } from "@/lib/utils";
 
+export async function GET() {
+  try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user?.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const serviceClient = await createServiceClient();
+    const email = user.email.toLowerCase();
+
+    // Verify student is registered
+    const { data: student } = await serviceClient
+      .from("eligible_students")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (!student) {
+      return NextResponse.json(
+        { error: "This email is not registered for Freshers 2026." },
+        { status: 403 }
+      );
+    }
+
+    // Fetch the ticket strictly for this authenticated user and student
+    const { data: ticket, error } = await serviceClient
+      .from("tickets")
+      .select("*")
+      .eq("eligible_student_id", student.id)
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Ticket fetch error:", error);
+      return NextResponse.json(
+        { error: "Failed to fetch ticket." },
+        { status: 500 }
+      );
+    }
+
+    if (!ticket) {
+      return NextResponse.json(
+        { error: "Ticket not found." },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ ticket });
+  } catch (error) {
+    console.error("Get ticket error:", error);
+    return NextResponse.json(
+      { error: "Something went wrong." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST() {
   try {
     const supabase = await createClient();

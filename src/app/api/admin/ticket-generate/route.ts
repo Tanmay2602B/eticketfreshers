@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/supabase/admin-guard";
-import { generateTicketId, generateSecureToken, isTicketWindowOpen } from "@/lib/utils";
+import { generateTicketId, generateSecureToken } from "@/lib/utils";
 
 /**
  * POST /api/admin/ticket-generate
