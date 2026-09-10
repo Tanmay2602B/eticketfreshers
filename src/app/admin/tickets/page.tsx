@@ -21,6 +21,8 @@ export default function TicketControlPage() {
   const [openAt, setOpenAt] = useState("");
   const [closeAt, setCloseAt] = useState("");
 
+  const [ticketAvailable, setTicketAvailable] = useState(false);
+
   useEffect(() => {
     fetch("/api/admin/event")
       .then((r) => r.json())
@@ -38,6 +40,8 @@ export default function TicketControlPage() {
               : ""
           );
         }
+        // ticketAvailable = what students actually see right now
+        setTicketAvailable(data.ticketAvailable || false);
       })
       .catch(() => setMessage({ type: "error", text: "Failed to load." }))
       .finally(() => setLoading(false));
@@ -64,7 +68,10 @@ export default function TicketControlPage() {
         return;
       }
 
-      setMessage({ type: "success", text: "Ticket control updated!" });
+      // Re-fetch to get updated ticketAvailable
+      const updated = await fetch("/api/admin/event").then((r) => r.json());
+      setTicketAvailable(updated.ticketAvailable || false);
+      setMessage({ type: "success", text: "Ticket control updated successfully!" });
     } catch {
       setMessage({ type: "error", text: "Network error." });
     } finally {
@@ -93,21 +100,29 @@ export default function TicketControlPage() {
         </Alert>
       )}
 
-      {/* Status Card */}
+      {/* Status Card — shows REAL student-facing status */}
       <Card className="mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>E-Ticket System Status</CardTitle>
+            <CardTitle>Student-Facing Status</CardTitle>
             <p className="text-sm text-slate-500 mt-1">
-              {ticketLive
-                ? "Students can access their tickets"
-                : "Ticket system is currently offline"}
+              {ticketAvailable
+                ? "✅ Students CAN see and generate their tickets RIGHT NOW"
+                : ticketLive
+                ? "⏳ Toggle is ON but outside the schedule window — students see Offline"
+                : "🔒 Students see \"Ticket System Offline\""}
             </p>
           </div>
-          <Badge variant={ticketLive ? "live" : "offline"}>
-            {ticketLive ? "LIVE" : "OFFLINE"}
+          <Badge variant={ticketAvailable ? "live" : "offline"}>
+            {ticketAvailable ? "LIVE" : "OFFLINE"}
           </Badge>
         </div>
+        {ticketLive && !ticketAvailable && (
+          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+            ⚠️ The toggle is ON but the current time is outside the access window you set.
+            Students still see the system as offline. Adjust the schedule or clear it to go live.
+          </div>
+        )}
       </Card>
 
       {/* Controls */}

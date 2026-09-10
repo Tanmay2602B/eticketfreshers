@@ -21,16 +21,32 @@ export default function StudentDashboard() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   // Load dashboard data
-  useEffect(() => {
-    fetch("/api/student/dashboard")
-      .then((r) => {
-        if (r.status === 401) { router.push("/"); return null; }
-        return r.json();
-      })
-      .then((d) => { if (d) setData(d); })
-      .catch(() => setError("Failed to load dashboard data."))
-      .finally(() => setLoading(false));
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchDashboard = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    try {
+      const r = await fetch("/api/student/dashboard");
+      if (r.status === 401) { router.push("/"); return; }
+      const d = await r.json();
+      if (d) setData(d);
+    } catch {
+      if (!silent) setError("Failed to load dashboard data.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [router]);
+
+  // Initial load
+  useEffect(() => { fetchDashboard(false); }, [fetchDashboard]);
+
+  // Auto-refresh every 15s so admin live/offline changes appear automatically
+  useEffect(() => {
+    const interval = setInterval(() => fetchDashboard(true), 15000);
+    return () => clearInterval(interval);
+  }, [fetchDashboard]);
 
   // Generate QR code whenever ticket changes
   useEffect(() => {
@@ -118,9 +134,25 @@ export default function StudentDashboard() {
         <div className="max-w-lg mx-auto px-6 py-6">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-lg font-bold text-white">My E-Ticket</h1>
-            <button onClick={handleLogout} className="text-white/70 hover:text-white text-sm font-medium transition-colors">
-              Logout
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => fetchDashboard(true)}
+                disabled={refreshing}
+                className="text-white/70 hover:text-white transition-colors"
+                title="Refresh"
+              >
+                <svg
+                  className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <button onClick={handleLogout} className="text-white/70 hover:text-white text-sm font-medium transition-colors">
+                Logout
+              </button>
+            </div>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
             <p className="text-white font-semibold text-lg">{student.name}</p>
