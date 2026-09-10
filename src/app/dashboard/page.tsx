@@ -59,8 +59,10 @@ export default function StudentDashboard() {
         const refreshed = await res.json();
         setData(refreshed);
       }
-    } catch {
-      setError("Failed to generate ticket. Please try again.");
+    } catch (err: unknown) {
+      console.error("PDF generation error:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Failed to generate ticket: ${message}. Please try again.`);
     } finally {
       setDownloading(false);
     }

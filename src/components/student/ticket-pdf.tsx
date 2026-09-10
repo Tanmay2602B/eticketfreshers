@@ -1,5 +1,3 @@
-import { jsPDF } from "jspdf";
-import QRCode from "qrcode";
 import type { EventRow, EligibleStudentRow, TicketRow } from "@/lib/types";
 import { formatDate, formatTime } from "@/lib/utils";
 
@@ -8,6 +6,12 @@ export async function generateTicketPDF(
   student: EligibleStudentRow,
   ticket: TicketRow
 ) {
+  // Dynamically import to avoid SSR issues
+  const [{ jsPDF }, QRCode] = await Promise.all([
+    import("jspdf"),
+    import("qrcode"),
+  ]);
+
   // A6 Landscape: 148mm x 105mm
   const doc = new jsPDF({
     orientation: "landscape",
@@ -95,14 +99,12 @@ export async function generateTicketPDF(
   // Right Section — QR Code
   // ============================================================
 
-  // Dashed separator line
+  // Solid separator line (dashes removed for v2 compatibility)
   doc.setDrawColor(199, 210, 254);
   doc.setLineWidth(0.3);
-  doc.setLineDashPattern([1.5, 1], 0);
   doc.line(95, 28, 95, h - 8);
-  doc.setLineDashPattern([], 0);
 
-  // QR Code
+  // Generate QR Code as data URL
   const qrDataUrl = await QRCode.toDataURL(ticket.qr_token, {
     width: 400,
     margin: 1,
