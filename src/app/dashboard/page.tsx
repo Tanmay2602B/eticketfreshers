@@ -34,64 +34,83 @@ export default function StudentDashboard() {
       .finally(() => setLoading(false));
   }, [router]);
 
-  const handleDownload = useCallback(async () => {
-    if (!data?.ticket || !data?.event || !data?.student) return;
-    setDownloading(true);
-    setError("");
-
-    try {
-      // Dynamically import PDF generator to keep bundle small
+  // Shared PDF download helper
+  const downloadPDF = useCallback(
+    async (ticketData: typeof data) => {
+      if (!ticketData?.ticket || !ticketData?.event || !ticketData?.student)
+        return;
       const { generateTicketPDF } = await import(
         "@/components/student/ticket-pdf"
       );
-      await generateTicketPDF(data.event, data.student, data.ticket);
-
+      await generateTicketPDF(
+        ticketData.event,
+        ticketData.student,
+        ticketData.ticket
+      );
       // Mark as downloaded
       await fetch("/api/student/ticket", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket_id: data.ticket.id }),
+        body: JSON.stringify({ ticket_id: ticketData.ticket.id }),
       });
+    },
+    []
+  );
 
-      // Refresh data
-      const res = await fetch("/api/student/dashboard");
-      if (res.ok) {
-        const refreshed = await res.json();
-        setData(refreshed);
-      }
-    } catch (err: unknown) {
-      console.error("PDF generation error:", err);
-      const message = err instanceof Error ? err.message : String(err);
-      setError(`Failed to generate ticket: ${message}. Please try again.`);
-    } finally {
-      setDownloading(false);
-    }
-  }, [data]);
-
+  // Generate ticket in DB then immediately download PDF
   const handleGenerateTicket = useCallback(async () => {
     setDownloading(true);
     setError("");
-
     try {
+      // Step 1 — create/fetch ticket from API
       const res = await fetch("/api/student/ticket", { method: "POST" });
       if (!res.ok) {
         const d = await res.json();
         setError(d.error || "Failed to generate ticket.");
         return;
       }
+      const { ticket: newTicket } = await res.json();
 
-      // Refresh dashboard data
+      // Step 2 — refresh dashboard to get full event + student data
       const dashRes = await fetch("/api/student/dashboard");
-      if (dashRes.ok) {
-        const refreshed = await dashRes.json();
-        setData(refreshed);
+      if (!dashRes.ok) {
+        setError("Ticket generated but failed to load. Please refresh.");
+        return;
       }
-    } catch {
-      setError("Network error. Please try again.");
+      const refreshed = await dashRes.json();
+      // Merge the freshly created ticket into refreshed data
+      const mergedData = { ...refreshed, ticket: newTicket || refreshed.ticket };
+      setData(mergedData);
+
+      // Step 3 — immediately download PDF
+      await downloadPDF(mergedData);
+    } catch (err: unknown) {
+      console.error("Generate+download error:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Failed to generate ticket: ${message}. Please try again.`);
     } finally {
       setDownloading(false);
     }
-  }, []);
+  }, [downloadPDF]);
+
+  // Re-download an existing ticket
+  const handleDownload = useCallback(async () => {
+    if (!data?.ticket || !data?.event || !data?.student) return;
+    setDownloading(true);
+    setError("");
+    try {
+      await downloadPDF(data);
+      // Refresh to update downloaded_at timestamp
+      const res = await fetch("/api/student/dashboard");
+      if (res.ok) setData(await res.json());
+    } catch (err: unknown) {
+      console.error("PDF download error:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Failed to download ticket: ${message}. Please try again.`);
+    } finally {
+      setDownloading(false);
+    }
+  }, [data, downloadPDF]);
 
   const handleLogout = async () => {
     const supabase = createClient();
