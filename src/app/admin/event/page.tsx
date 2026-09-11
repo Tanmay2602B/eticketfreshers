@@ -17,6 +17,8 @@ export default function EventSettingsPage() {
     end_time: "",
     venue: "",
     attire: "",
+    attire_boys: "",
+    attire_girls: "",
     instructions: "",
     banner_url: "",
   });
@@ -138,12 +140,49 @@ export default function EventSettingsPage() {
             placeholder="Main Auditorium"
           />
 
-          <Input
-            label="Attire / Dress Code"
-            value={event.attire || ""}
-            onChange={(e) => updateField("attire", e.target.value)}
-            placeholder="Formal / Smart Casual"
-          />
+          {/* Attire — gender-specific */}
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-700 mb-1">Dress Code / Attire</p>
+              <p className="text-xs text-slate-400">
+                Set separate attire guidelines for boys and girls. Each will only appear on the student site once filled in.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="relative">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-base">👔</span>
+                  <label className="text-sm font-medium text-slate-700">Boys Attire</label>
+                </div>
+                <input
+                  type="text"
+                  value={event.attire_boys || ""}
+                  onChange={(e) => updateField("attire_boys", e.target.value)}
+                  placeholder="e.g. Formal shirt, trousers & shoes"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 focus:outline-none transition-shadow"
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  {event.attire_boys ? "✅ Will be shown on student site" : "Leave blank to hide from students"}
+                </p>
+              </div>
+              <div className="relative">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-base">👗</span>
+                  <label className="text-sm font-medium text-slate-700">Girls Attire</label>
+                </div>
+                <input
+                  type="text"
+                  value={event.attire_girls || ""}
+                  onChange={(e) => updateField("attire_girls", e.target.value)}
+                  placeholder="e.g. Salwar kameez or saree"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 focus:outline-none transition-shadow"
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  {event.attire_girls ? "✅ Will be shown on student site" : "Leave blank to hide from students"}
+                </p>
+              </div>
+            </div>
+          </div>
 
           <Textarea
             label="Important Instructions"

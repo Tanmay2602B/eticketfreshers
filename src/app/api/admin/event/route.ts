@@ -53,6 +53,8 @@ export async function PUT(request: NextRequest) {
       end_time: body.end_time || null,
       venue: body.venue || null,
       attire: body.attire || null,
+      attire_boys: body.attire_boys || null,
+      attire_girls: body.attire_girls || null,
       instructions: body.instructions || null,
       banner_url: body.banner_url || null,
     };

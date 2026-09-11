@@ -11,6 +11,8 @@ export interface EventRow {
   end_time: string | null;
   venue: string | null;
   attire: string | null;
+  attire_boys: string | null;
+  attire_girls: string | null;
   instructions: string | null;
   banner_url: string | null;
   ticket_live: boolean;

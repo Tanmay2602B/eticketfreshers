@@ -239,7 +239,8 @@ export default function StudentDashboard() {
                     <TicketField label="Date" value={formatDate(event?.date ?? null)} />
                     <TicketField label="Time" value={event ? `${formatTime(event.start_time)}${event.end_time ? ` – ${formatTime(event.end_time)}` : ""}` : "TBA"} />
                     <TicketField label="Venue" value={event?.venue || "TBA"} />
-                    {event?.attire && <TicketField label="Attire" value={event.attire} />}
+                    {event?.attire_boys && <TicketField label="Boys Attire" value={event.attire_boys} />}
+                    {event?.attire_girls && <TicketField label="Girls Attire" value={event.attire_girls} />}
                   </div>
 
                   {/* Dashed divider */}
@@ -323,7 +324,8 @@ export default function StudentDashboard() {
               <InfoRow icon="📅" label="Date" value={formatDate(event.date)} />
               <InfoRow icon="🕐" label="Time" value={`${formatTime(event.start_time)}${event.end_time ? ` — ${formatTime(event.end_time)}` : ""}`} />
               <InfoRow icon="📍" label="Venue" value={event.venue || "TBA"} />
-              {event.attire && <InfoRow icon="👔" label="Attire" value={event.attire} />}
+              {event.attire_boys && <InfoRow icon="👔" label="Boys Attire" value={event.attire_boys} />}
+              {event.attire_girls && <InfoRow icon="👗" label="Girls Attire" value={event.attire_girls} />}
               {event.instructions && (
                 <div className="pt-2 border-t border-slate-100">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">📋 Instructions</p>
