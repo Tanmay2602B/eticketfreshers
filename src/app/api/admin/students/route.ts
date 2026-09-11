@@ -2,6 +2,54 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/supabase/admin-guard";
 
+export async function DELETE(request: Request) {
+  try {
+    const guard = await requireAdmin();
+    if (!guard.authorized) return guard.error;
+
+    const body = await request.json();
+    const ids: string[] = body.ids;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json({ error: "No student IDs provided." }, { status: 400 });
+    }
+
+    const supabase = await createServiceClient();
+
+    // Safety check: do not delete students who have ACTIVE or USED tickets
+    const { data: blockedTickets } = await supabase
+      .from("tickets")
+      .select("eligible_student_id, status")
+      .in("eligible_student_id", ids)
+      .in("status", ["ACTIVE", "USED"]);
+
+    const blockedIds = new Set((blockedTickets || []).map((t) => t.eligible_student_id));
+    const safeIds = ids.filter((id) => !blockedIds.has(id));
+
+    if (safeIds.length === 0) {
+      return NextResponse.json(
+        { error: "Cannot delete: selected students have active or used tickets." },
+        { status: 422 }
+      );
+    }
+
+    const { error } = await supabase
+      .from("eligible_students")
+      .delete()
+      .in("id", safeIds);
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      deleted: safeIds.length,
+      skipped: ids.length - safeIds.length,
+    });
+  } catch (error) {
+    console.error("Student delete error:", error);
+    return NextResponse.json({ error: "Failed to delete students." }, { status: 500 });
+  }
+}
+
 export async function GET() {
   try {
     const guard = await requireAdmin();
