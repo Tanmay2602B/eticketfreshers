@@ -38,6 +38,16 @@ type FilterStatus =
   | "scanned"
   | "not_scanned";
 
+/** A group of rows that share the same email or student_id — only one can be kept. */
+interface DuplicateGroup {
+  /** 'email' or 'student_id' */
+  field: "email" | "student_id";
+  /** The conflicting value */
+  value: string;
+  /** Indices into the full `allRows` array */
+  indices: number[];
+}
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -85,24 +95,56 @@ function scanBadge(student: StudentRecord) {
 }
 
 // ============================================================
-// Preview Modal
+// Preview Modal  (with Duplicate Resolution)
 // ============================================================
 
 function PreviewModal({
-  rows,
+  allRows,
+  duplicateGroups,
   onConfirm,
   onCancel,
   uploading,
 }: {
-  rows: UploadRow[];
-  onConfirm: () => void;
+  allRows: UploadRow[];
+  duplicateGroups: DuplicateGroup[];
+  onConfirm: (resolvedRows: UploadRow[]) => void;
   onCancel: () => void;
   uploading: boolean;
 }) {
   const [confirmed, setConfirmed] = useState(false);
+  // Map: `field:value` → chosen index in allRows (or -1 = exclude all)
+  const [choices, setChoices] = useState<Map<string, number>>(() => {
+    const m = new Map<string, number>();
+    for (const g of duplicateGroups) {
+      // Default: keep the first occurrence
+      m.set(`${g.field}:${g.value}`, g.indices[0]);
+    }
+    return m;
+  });
 
-  const validRows = rows.filter((r) => r.name && r.email && r.student_id);
-  const warningRows = rows.filter((r) => !r.course || !r.mobile);
+  // Build the set of indices that are "losers" — flagged as duplicate and NOT chosen
+  const excludedIndices = new Set<number>();
+  for (const g of duplicateGroups) {
+    const key = `${g.field}:${g.value}`;
+    const chosen = choices.get(key) ?? g.indices[0];
+    for (const idx of g.indices) {
+      if (idx !== chosen) excludedIndices.add(idx);
+    }
+  }
+  // Also build the set of all indices that appear in any duplicate group
+  const duplicatedIndices = new Set<number>(duplicateGroups.flatMap((g) => g.indices));
+
+  const resolvedRows = allRows.filter((_, i) => !excludedIndices.has(i));
+  const validResolved = resolvedRows.filter((r) => r.name && r.email && r.student_id);
+  const warningCount = resolvedRows.filter((r) => !r.course || !r.mobile).length;
+  const hasDuplicates = duplicateGroups.length > 0;
+
+  function setChoice(key: string, idx: number) {
+    setChoices((prev) => new Map(prev).set(key, idx));
+  }
+
+  // Tab: "all" or "duplicates"
+  const [tab, setTab] = useState<"all" | "duplicates">(hasDuplicates ? "duplicates" : "all");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -112,7 +154,8 @@ function PreviewModal({
           <div>
             <h2 className="text-lg font-bold text-slate-900">Review Before Uploading</h2>
             <p className="text-sm text-slate-500 mt-0.5">
-              Check all rows carefully — uploading will <span className="font-semibold text-red-600">replace all existing student data</span>.
+              Check all rows carefully — uploading will{" "}
+              <span className="font-semibold text-red-600">replace all existing student data</span>.
             </p>
           </div>
           <button
@@ -127,69 +170,221 @@ function PreviewModal({
         </div>
 
         {/* Stats bar */}
-        <div className="flex gap-4 px-6 py-3 bg-slate-50 border-b border-slate-100 flex-wrap">
+        <div className="flex gap-4 px-6 py-3 bg-slate-50 border-b border-slate-100 flex-wrap items-center">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-            <span className="text-sm font-semibold text-slate-700">{validRows.length} valid rows</span>
+            <span className="text-sm font-semibold text-slate-700">{validResolved.length} will be imported</span>
           </div>
-          {warningRows.length > 0 && (
+          {hasDuplicates && (
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
-              <span className="text-sm text-slate-500">{warningRows.length} rows missing optional fields (course/mobile)</span>
+              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />
+              <span className="text-sm text-orange-700 font-medium">
+                {duplicateGroups.length} duplicate conflict{duplicateGroups.length !== 1 ? "s" : ""} — resolve below
+              </span>
             </div>
           )}
-          <div className="ml-auto text-sm text-slate-400">{rows.length} total rows</div>
+          {warningCount > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+              <span className="text-sm text-slate-500">{warningCount} rows missing optional fields</span>
+            </div>
+          )}
+          <div className="ml-auto text-sm text-slate-400">{allRows.length} total rows in file</div>
         </div>
 
-        {/* Table */}
+        {/* Tabs */}
+        <div className="flex gap-1 px-6 pt-3 pb-0 border-b border-slate-100">
+          {hasDuplicates && (
+            <button
+              onClick={() => setTab("duplicates")}
+              className={`px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 transition-colors ${
+                tab === "duplicates"
+                  ? "border-orange-500 text-orange-700 bg-orange-50"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              ⚠️ Resolve Duplicates
+              <span className="ml-1.5 text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">
+                {duplicateGroups.length}
+              </span>
+            </button>
+          )}
+          <button
+            onClick={() => setTab("all")}
+            className={`px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 transition-colors ${
+              tab === "all"
+                ? "border-primary-500 text-primary-700 bg-primary-50"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            All Rows ({allRows.length})
+          </button>
+        </div>
+
+        {/* Tab content */}
         <div className="flex-1 overflow-auto px-6 py-4">
-          <table className="w-full text-sm min-w-[600px]">
-            <thead className="sticky top-0 bg-white z-10">
-              <tr className="border-b-2 border-slate-100">
-                <th className="text-left py-2 px-2 text-xs font-semibold text-slate-400 uppercase tracking-wide w-10">#</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Name</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Email</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Student ID</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Course</th>
-                <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Mobile</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, i) => {
-                const isValid = !!(row.name && row.email && row.student_id);
-                const hasMissingOptional = !row.course || !row.mobile;
+
+          {/* ── Duplicates tab ── */}
+          {tab === "duplicates" && hasDuplicates && (
+            <div className="space-y-5">
+              {duplicateGroups.map((g) => {
+                const key = `${g.field}:${g.value}`;
+                const chosen = choices.get(key) ?? g.indices[0];
                 return (
-                  <tr
-                    key={i}
-                    className={`border-t border-slate-50 ${
-                      !isValid ? "bg-red-50" : hasMissingOptional ? "bg-amber-50/40" : "hover:bg-slate-50"
-                    }`}
-                  >
-                    <td className="py-2 px-2 text-xs text-slate-400 font-mono">{i + 2}</td>
-                    <td className="py-2 px-2">
-                      {!isValid ? (
-                        <span title="Missing required fields" className="text-red-500 text-base">❌</span>
-                      ) : hasMissingOptional ? (
-                        <span title="Missing optional fields" className="text-amber-500 text-base">⚠️</span>
-                      ) : (
-                        <span title="All fields present" className="text-emerald-500 text-base">✅</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-2 font-medium text-slate-800 max-w-[160px] truncate">{row.name || <span className="text-red-400 italic">missing</span>}</td>
-                    <td className="py-2 px-2 text-slate-600 max-w-[180px] truncate">{row.email || <span className="text-red-400 italic">missing</span>}</td>
-                    <td className="py-2 px-2 font-mono text-xs text-slate-600">{row.student_id || <span className="text-red-400 italic">missing</span>}</td>
-                    <td className="py-2 px-2 text-slate-500">{row.course || <span className="text-slate-300">—</span>}</td>
-                    <td className="py-2 px-2 text-slate-500">{row.mobile || <span className="text-slate-300">—</span>}</td>
-                  </tr>
+                  <div key={key} className="rounded-xl border border-orange-200 bg-orange-50/40 overflow-hidden">
+                    {/* Group header */}
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-orange-50 border-b border-orange-200">
+                      <svg className="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="text-xs font-bold text-orange-700 uppercase tracking-wide">
+                        Duplicate {g.field === "email" ? "Email" : "Student ID"}
+                      </span>
+                      <code className="text-xs font-mono bg-white border border-orange-200 text-orange-800 px-2 py-0.5 rounded-md ml-1">
+                        {g.value}
+                      </code>
+                      <span className="ml-auto text-xs text-orange-600">{g.indices.length} entries — pick one to keep</span>
+                    </div>
+
+                    {/* Option rows */}
+                    <div className="divide-y divide-orange-100">
+                      {g.indices.map((rowIdx) => {
+                        const row = allRows[rowIdx];
+                        const isChosen = chosen === rowIdx;
+                        const isExclude = chosen === -1;
+                        return (
+                          <label
+                            key={rowIdx}
+                            className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                              isChosen && !isExclude
+                                ? "bg-emerald-50 hover:bg-emerald-50"
+                                : "hover:bg-white"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name={key}
+                              value={rowIdx}
+                              checked={isChosen && !isExclude}
+                              onChange={() => setChoice(key, rowIdx)}
+                              className="mt-1 w-4 h-4 accent-emerald-600 cursor-pointer flex-shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-sm text-slate-900">{row.name}</span>
+                                <span className="text-xs text-slate-400">Row {rowIdx + 2}</span>
+                                {isChosen && !isExclude && (
+                                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200 rounded-full px-2 py-0.5">✓ Keep this</span>
+                                )}
+                              </div>
+                              <div className="flex gap-4 mt-1 text-xs text-slate-500 flex-wrap">
+                                <span className="truncate max-w-[200px]">{row.email}</span>
+                                <span className="font-mono">{row.student_id}</span>
+                                {row.course && <span>{row.course}</span>}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                      {/* Exclude-all option */}
+                      <label
+                        className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                          chosen === -1 ? "bg-red-50" : "hover:bg-red-50/40"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name={key}
+                          value={-1}
+                          checked={chosen === -1}
+                          onChange={() => setChoice(key, -1)}
+                          className="w-4 h-4 accent-red-600 cursor-pointer flex-shrink-0"
+                        />
+                        <span className="text-sm text-red-600 font-medium">✕ Exclude all — do not import this entry</span>
+                      </label>
+                    </div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          )}
+
+          {/* ── All rows tab ── */}
+          {tab === "all" && (
+            <table className="w-full text-sm min-w-[600px]">
+              <thead className="sticky top-0 bg-white z-10">
+                <tr className="border-b-2 border-slate-100">
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-slate-400 uppercase tracking-wide w-10">#</th>
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Name</th>
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Email</th>
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Student ID</th>
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Course</th>
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Mobile</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allRows.map((row, i) => {
+                  const isValid = !!(row.name && row.email && row.student_id);
+                  const hasMissingOptional = !row.course || !row.mobile;
+                  const isDuplicated = duplicatedIndices.has(i);
+                  const isExcluded = excludedIndices.has(i);
+                  return (
+                    <tr
+                      key={i}
+                      className={`border-t border-slate-50 ${
+                        isExcluded
+                          ? "bg-red-50 opacity-50"
+                          : !isValid
+                          ? "bg-red-50"
+                          : isDuplicated
+                          ? "bg-orange-50"
+                          : hasMissingOptional
+                          ? "bg-amber-50/40"
+                          : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <td className="py-2 px-2 text-xs text-slate-400 font-mono">{i + 2}</td>
+                      <td className="py-2 px-2">
+                        {isExcluded ? (
+                          <span title="Excluded — duplicate not kept" className="text-red-400 text-base">✕</span>
+                        ) : !isValid ? (
+                          <span title="Missing required fields" className="text-red-500 text-base">❌</span>
+                        ) : isDuplicated ? (
+                          <span title="Duplicate — resolve in Duplicates tab" className="text-orange-500 text-base">⚠️</span>
+                        ) : hasMissingOptional ? (
+                          <span title="Missing optional fields" className="text-amber-500 text-base">⚠️</span>
+                        ) : (
+                          <span title="All fields present" className="text-emerald-500 text-base">✅</span>
+                        )}
+                      </td>
+                      <td className={`py-2 px-2 font-medium max-w-[160px] truncate ${isExcluded ? "text-slate-400 line-through" : "text-slate-800"}`}>{row.name || <span className="text-red-400 italic">missing</span>}</td>
+                      <td className="py-2 px-2 text-slate-600 max-w-[180px] truncate">{row.email || <span className="text-red-400 italic">missing</span>}</td>
+                      <td className="py-2 px-2 font-mono text-xs text-slate-600">{row.student_id || <span className="text-red-400 italic">missing</span>}</td>
+                      <td className="py-2 px-2 text-slate-500">{row.course || <span className="text-slate-300">—</span>}</td>
+                      <td className="py-2 px-2 text-slate-500">{row.mobile || <span className="text-slate-300">—</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
 
         {/* Footer — confirmation + actions */}
         <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl space-y-3">
+          {hasDuplicates && (
+            <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>
+                <strong>{excludedIndices.size} row{excludedIndices.size !== 1 ? "s" : ""}</strong> will be excluded based on your duplicate choices.
+                Use the <strong>Resolve Duplicates</strong> tab to change selections.
+              </span>
+            </div>
+          )}
+
           {/* Replace-all warning + confirmation checkbox */}
           <label className="flex items-start gap-3 cursor-pointer group">
             <input
@@ -202,7 +397,7 @@ function PreviewModal({
             <span className="text-sm text-slate-700 select-none group-hover:text-slate-900 transition-colors">
               I understand that uploading will{" "}
               <span className="font-semibold text-red-600">permanently replace all existing student records</span>{" "}
-              with the {validRows.length} rows above.
+              with the{" "}<strong>{validResolved.length}</strong> resolved rows above.
             </span>
           </label>
 
@@ -213,14 +408,14 @@ function PreviewModal({
             <Button
               variant="primary"
               size="sm"
-              onClick={onConfirm}
+              onClick={() => onConfirm(resolvedRows)}
               loading={uploading}
-              disabled={!confirmed || validRows.length === 0}
+              disabled={!confirmed || validResolved.length === 0}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
-              Upload & Replace All ({validRows.length} students)
+              Upload & Replace All ({validResolved.length} students)
             </Button>
           </div>
         </div>
@@ -324,7 +519,8 @@ export default function UploadPage() {
   // --- Upload state ---
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
-  const [rows, setRows] = useState<UploadRow[]>([]);
+  const [rows, setRows] = useState<UploadRow[]>([]);          // all parsed rows (including duplicates)
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
   const [parseError, setParseError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [summary, setSummary] = useState<UploadSummary | null>(null);
@@ -481,17 +677,54 @@ export default function UploadPage() {
           return;
         }
 
-        const parsedRows: UploadRow[] = normalizedData
-          .map((row) => ({
-            name: row.name || "",
-            email: row.email || "",
-            student_id: studentIdKey ? row[studentIdKey] || "" : "",
-            course: row.course || undefined,
-            mobile: row.mobile || row.phone || row.mobile_number || undefined,
-          }))
-          .filter((r) => r.name && r.email && r.student_id);
+        // Keep ALL rows (including invalid / duplicates) for full transparency
+        const parsedRows: UploadRow[] = normalizedData.map((row) => ({
+          name: row.name || "",
+          email: row.email || "",
+          student_id: studentIdKey ? row[studentIdKey] || "" : "",
+          course: row.course || undefined,
+          mobile: row.mobile || row.phone || row.mobile_number || undefined,
+        }));
+
+        // ── Detect duplicates within the file ──
+        // Build email → [indices] and student_id → [indices] maps
+        const emailMap = new Map<string, number[]>();
+        const sidMap   = new Map<string, number[]>();
+        parsedRows.forEach((r, i) => {
+          const email = r.email.trim().toLowerCase();
+          const sid   = r.student_id.trim().toLowerCase();
+          if (email) {
+            if (!emailMap.has(email)) emailMap.set(email, []);
+            emailMap.get(email)!.push(i);
+          }
+          if (sid) {
+            if (!sidMap.has(sid)) sidMap.set(sid, []);
+            sidMap.get(sid)!.push(i);
+          }
+        });
+
+        const groups: DuplicateGroup[] = [];
+        // Track which indices have already been assigned to a group (avoid double-reporting)
+        const assignedToGroup = new Set<number>();
+
+        for (const [email, indices] of emailMap) {
+          if (indices.length > 1) {
+            groups.push({ field: "email", value: email, indices });
+            indices.forEach((i) => assignedToGroup.add(i));
+          }
+        }
+        for (const [sid, indices] of sidMap) {
+          if (indices.length > 1) {
+            // Only report if not already fully covered by an email-group
+            const novel = indices.filter((i) => !assignedToGroup.has(i));
+            if (novel.length > 0) {
+              groups.push({ field: "student_id", value: sid, indices });
+            }
+          }
+        }
 
         setRows(parsedRows);
+        setDuplicateGroups(groups);
         // Automatically open the preview modal after parsing
         setShowPreview(true);
       } catch (err) {
@@ -504,10 +737,10 @@ export default function UploadPage() {
   }
 
   // ----------------------------------------------------------------
-  // Upload
+  // Upload — receives the already-resolved rows from the preview modal
   // ----------------------------------------------------------------
-  async function handleUpload() {
-    if (rows.length === 0) return;
+  async function handleUpload(resolvedRows: UploadRow[]) {
+    if (resolvedRows.length === 0) return;
     setUploading(true);
     setUploadError("");
     setSummary(null);
@@ -516,7 +749,7 @@ export default function UploadPage() {
       const res = await fetch("/api/admin/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
+        body: JSON.stringify({ rows: resolvedRows }),
       });
 
       const data = await res.json();
@@ -602,6 +835,7 @@ export default function UploadPage() {
   function handleReset() {
     setFileName("");
     setRows([]);
+    setDuplicateGroups([]);
     setParseError("");
     setUploadError("");
     setShowPreview(false);
@@ -745,11 +979,12 @@ export default function UploadPage() {
       {/* Preview Modal */}
       {showPreview && rows.length > 0 && (
         <PreviewModal
-          rows={rows}
+          allRows={rows}
+          duplicateGroups={duplicateGroups}
           onConfirm={handleUpload}
           onCancel={() => {
             setShowPreview(false);
-            handleReset();
+            // Keep file/rows so admin can re-open preview; only reset on explicit "Clear File"
           }}
           uploading={uploading}
         />
