@@ -550,6 +550,13 @@ export default function UploadPage() {
   const [emergencyError, setEmergencyError] = useState("");
   const [emergencySuccess, setEmergencySuccess] = useState("");
 
+  // --- Resend OTP state ---
+  const [resendingOtp, setResendingOtp] = useState<string | null>(null);
+  const [resendOtpMessage, setResendOtpMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
   // ----------------------------------------------------------------
   // Load student list
   // ----------------------------------------------------------------
@@ -971,6 +978,44 @@ export default function UploadPage() {
     }
   }
 
+  // ----------------------------------------------------------------
+  // Resend OTP — admin manually fires a fresh OTP email to a student
+  // ----------------------------------------------------------------
+  async function handleResendOtp(studentId: string, studentName: string) {
+    setResendingOtp(studentId);
+    setResendOtpMessage(null);
+
+    try {
+      const res = await fetch("/api/admin/resend-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: studentId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setResendOtpMessage({
+          type: "error",
+          text: data.error || "Failed to resend OTP.",
+        });
+        return;
+      }
+
+      setResendOtpMessage({
+        type: "success",
+        text: `OTP email sent to ${studentName}.`,
+      });
+    } catch {
+      setResendOtpMessage({
+        type: "error",
+        text: "Network error. Please try again.",
+      });
+    } finally {
+      setResendingOtp(null);
+    }
+  }
+
   // ================================================================
   // Render
   // ================================================================
@@ -1241,6 +1286,16 @@ export default function UploadPage() {
         </Alert>
       )}
 
+      {/* Resend OTP feedback */}
+      {resendOtpMessage && (
+        <Alert
+          variant={resendOtpMessage.type}
+          onDismiss={() => setResendOtpMessage(null)}
+        >
+          {resendOtpMessage.text}
+        </Alert>
+      )}
+
       {/* ── Student List ── */}
       <Card>
         {/* Delete feedback */}
@@ -1479,6 +1534,9 @@ export default function UploadPage() {
                   <th className="text-center py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     Emergency
                   </th>
+                  <th className="text-center py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Resend OTP
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1578,6 +1636,51 @@ export default function UploadPage() {
                           </svg>
                         )}
                         🚨 Download
+                      </button>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        onClick={() => handleResendOtp(student.id, student.name)}
+                        disabled={resendingOtp === student.id}
+                        title={`Manually resend OTP login email to ${student.email}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {resendingOtp === student.id ? (
+                          <svg
+                            className="animate-spin w-3.5 h-3.5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            />
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                            />
+                          </svg>
+                        ) : (
+                          <svg
+                            className="w-3.5 h-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                            />
+                          </svg>
+                        )}
+                        ✉️ Resend OTP
                       </button>
                     </td>
                   </tr>
