@@ -34,10 +34,11 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Protect student authenticated routes — redirect unauthenticated to unified login at /
+  // /ticket/late is intentionally excluded: it uses its own OTP flow and is publicly accessible.
   const isStudentProtectedRoute =
     pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/ticket") ||
-    pathname.startsWith("/student");
+    pathname.startsWith("/student") ||
+    (pathname.startsWith("/ticket") && !pathname.startsWith("/ticket/late"));
 
   if (isStudentProtectedRoute && !user) {
     const url = request.nextUrl.clone();
