@@ -306,6 +306,22 @@ export default function UnifiedLoginPage() {
                     <p className="text-xs text-slate-400 text-center">
                       Only emails registered in the eligible student list can proceed.
                     </p>
+
+                    {/* Late comer shortcut */}
+                    <div className="flex items-center gap-3 mt-1">
+                      <div className="flex-1 h-px bg-slate-100" />
+                      <span className="text-xs text-slate-400">or</span>
+                      <div className="flex-1 h-px bg-slate-100" />
+                    </div>
+                    <a
+                      href="/ticket/late"
+                      className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border-2 border-amber-200 bg-amber-50 hover:bg-amber-100 transition-colors text-sm font-semibold text-amber-700"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Got a Late Comer ticket? Access it here →
+                    </a>
                   </form>
                 ) : (
                   <form onSubmit={handleVerifyOtp} className="space-y-5">

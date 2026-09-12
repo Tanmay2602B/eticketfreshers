@@ -114,17 +114,13 @@ export async function POST(request: NextRequest) {
 
     if (insertError) throw insertError;
 
-    // Ensure user exists in Supabase Auth so OTP can be sent
-    // (ignore error — user may already exist)
-    await supabase.auth.admin.createUser({
-      email,
-      email_confirm: true,
-    });
-
-    // Send OTP via Supabase Auth
+    // Send OTP via Supabase Auth.
+    // shouldCreateUser: true — Supabase will create the auth user if they don't
+    // already exist, so late-comer students (not in eligible_students) can still
+    // receive an OTP without a separate admin.createUser() call.
     const { error: otpError } = await supabase.auth.signInWithOtp({
       email,
-      options: { shouldCreateUser: false },
+      options: { shouldCreateUser: true },
     });
 
     if (otpError) {
