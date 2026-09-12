@@ -46,10 +46,69 @@ export async function POST(request: NextRequest) {
     }
 
     if (!ticket) {
-      // Log invalid scan attempt
+      // ── Fallback: check late-comer tickets ──────────────────────────
+      const { data: lateTicket, error: lateLookupError } = await supabase
+        .from("late_tickets")
+        .select("*")
+        .eq("qr_token", qrToken)
+        .is("cancelled_at", null)
+        .maybeSingle();
+
+      if (lateLookupError) {
+        console.error("Late ticket scan lookup error:", lateLookupError);
+      }
+
+      if (!lateTicket) {
+        return NextResponse.json({
+          result: "INVALID" as const,
+          message: "This QR code is not associated with any valid ticket.",
+        });
+      }
+
+      // Late ticket found — check status
+      if (lateTicket.status !== "verified") {
+        return NextResponse.json({
+          result: "INVALID" as const,
+          message: "This late-comer ticket has not been verified by the student yet.",
+        });
+      }
+
+      // Mark as accessed (used) — update accessed_at as the usage marker
+      // We reuse the existing accessed_at field; a second scan = "already used"
+      if (lateTicket.accessed_at) {
+        // Check if it was already used as entry (accessed more than 2 min ago = used)
+        const accessedMs = new Date(lateTicket.accessed_at).getTime();
+        const nowMs = Date.now();
+        if (nowMs - accessedMs > 2 * 60 * 1000) {
+          return NextResponse.json({
+            result: "ALREADY_USED" as const,
+            ticket_id: lateTicket.ticket_id,
+            student: {
+              name: lateTicket.name,
+              student_id: lateTicket.student_id || "N/A",
+              course: null,
+            },
+            used_at: lateTicket.accessed_at,
+            message: `This ticket was already used on ${new Date(lateTicket.accessed_at).toLocaleString("en-IN")}.`,
+          });
+        }
+      }
+
+      // Mark entry time
+      await supabase
+        .from("late_tickets")
+        .update({ accessed_at: new Date().toISOString() })
+        .eq("id", lateTicket.id);
+
       return NextResponse.json({
-        result: "INVALID" as const,
-        message: "This QR code is not associated with any valid ticket.",
+        result: "VALID" as const,
+        ticket_id: lateTicket.ticket_id,
+        student: {
+          name: lateTicket.name,
+          student_id: lateTicket.student_id || "Late Entry",
+          course: lateTicket.reason ? `Reason: ${lateTicket.reason}` : null,
+        },
+        message: "Late comer entry allowed. Welcome!",
       });
     }
 

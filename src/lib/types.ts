@@ -119,3 +119,41 @@ export interface TicketControlPayload {
   ticket_open_at: string | null;
   ticket_close_at: string | null;
 }
+
+// ============================================================
+// Late-Comer Ticket types
+// ============================================================
+
+export type LateTicketStatus = "pending" | "verified";
+
+export interface LateTicketRow {
+  id: string;
+  name: string;
+  email: string;
+  student_id: string | null;
+  reason: string | null;
+  status: LateTicketStatus;
+  ticket_id: string | null;
+  qr_token: string | null;
+  created_at: string;
+  accessed_at: string | null;
+  cancelled_at: string | null;
+}
+
+export interface CreateLateTicketPayload {
+  name: string;
+  email: string;
+  student_id?: string;
+  reason?: string;
+}
+
+export interface LateTicketVerifyPayload {
+  email: string;
+  token: string;
+}
+
+export interface LateTicketVerifyResponse {
+  success: true;
+  ticket: LateTicketRow;
+  event: EventRow | null;
+}
